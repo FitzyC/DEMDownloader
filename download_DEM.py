@@ -1,14 +1,14 @@
 """
 Downloads DEM tiles for orthorectification. Tiles are downloaded at 1:250k scale to save on space.
 
-Python Libraries needed: Pandas, Numpy, GDAL, requests
+Python Libraries needed: Numpy, requests
 """
 
 from DEM.DEM import NTS_tiles_from_extent, download_multiple_DEM
 
 if __name__ == "__main__":
     ###USER INPUT###
-    DEM_dir = "C:\\Users\\cam25\\Documents\\WSC\\WSC-SSWM\\DEMS"  #Full path to folder where downloaded DEMs will be placed
+    DEM_dir = ""  #Full path to folder where downloaded DEMs will be placed
     demType = 'SRTM'  #One of CDED or SRTM
     # Latitude and Longitude mins/maxs of bounding box to download DEMs within, example for NewBrunswick included
     area = {'ymin': 44, 'ymax': 48, 'xmin': -70, 'xmax': -64}
