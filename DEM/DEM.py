@@ -3,11 +3,7 @@ This file contains functions to download and mosaic DEM tiles from a
 variety of providers
 """
 
-import gdal
-import glob
 import itertools
-import ogr
-import osr
 import os
 import re
 import tarfile
