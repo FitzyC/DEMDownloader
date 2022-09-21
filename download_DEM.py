@@ -1,10 +1,10 @@
 """
-Downloads DEM tiles for orthorectification. Tiles are downloaded at 1:250k scale to save on space.
+Downloads DEM tiles
 
 Python Libraries needed: Numpy, requests
 """
 
-from DEM.DEM import NTS_tiles_from_extent, download_multiple_DEM
+from DEM.DEM import CDEM_tiles_from_extent, download_multiple_DEM
 
 if __name__ == "__main__":
     ###USER INPUT###
@@ -17,5 +17,5 @@ if __name__ == "__main__":
     if demType == 'SRTM':
         download_multiple_DEM(area, DEM_dir, 'SRTM')
     elif demType == 'CDED':
-        tiles = NTS_tiles_from_extent(area, scale=1)
-        download_multiple_DEM(tiles, DEM_dir, 'CDED')
+        tiles = CDEM_tiles_from_extent(area)
+        download_multiple_DEM(tiles, DEM_dir, 'CDEM')

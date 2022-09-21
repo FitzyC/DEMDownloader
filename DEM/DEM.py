@@ -1,9 +1,8 @@
 """ 
-This file contains functions to download and mosaic DEM tiles from a 
+This file contains functions to download DEM tiles from a
 variety of providers
 """
 
-import itertools
 import os
 import re
 import tarfile
@@ -16,21 +15,21 @@ import numpy as np
 import urllib.request
 
 from os import path, remove, listdir, makedirs
-from DEM.NTS import nts
+from DEM.CDEM import CDEM
 
 
-def get_tile_path_CDED(NTS):
-    """ Get FTP path for a CDED NTS tile 
+def get_tile_path_CDED(tileName):
+    """ Get FTP path for a CDEM tile
     
     *Parameters*
     
-    NTS : str
-        Name of NTS sheet for which a DEM is desired
+    tileCode : str
+        Code of DEM tile desired
     
     *Returns*
     
     str
-        FTP location for CDED DEM tile
+        FTP location for tile
     
     Example
     -------
@@ -38,22 +37,12 @@ def get_tile_path_CDED(NTS):
     get_tile_path_CDED("079D")
     """
     
-    NTS = NTS.lower()
-    
-    # test resolution from NTS specification
-    if len(NTS) == 6:
-        resolution = "50k_dem" 
-    elif len(NTS) == 4:
-        resolution = "250k_dem" 
-    else:
-        raise Exception("Invalid NTS sheet!")
-    
     # base path for all files
-    basepath =  "http://ftp.geogratis.gc.ca/pub/nrcan_rncan/archive/elevation/geobase_cded_dnec"
+    basepath =  "https://ftp.maps.canada.ca/pub/nrcan_rncan/elevation/cdem_mnec"
     
     # build ftp path
-    tile = NTS[0:3]
-    ftp_path = "{}/{}/{}/{}".format(basepath, resolution, tile, NTS)
+    tile = tileName[0:3]
+    ftp_path = "{}/{}/cdem_dem_{}_tif".format(basepath, tile, tileName)
     ftp_path = ftp_path + ".zip"
     
     return(ftp_path)
@@ -91,7 +80,7 @@ def get_tile_path_SRTM(lon=None, lat=None, name=None):
     """
     get_tile_path_SRTM(-110, 49)
     """
-    baseurl = "http://e4ftl01.cr.usgs.gov/MEASURES/SRTMGL1.003/2000.02.11/"
+    baseurl = "https://e4ftl01.cr.usgs.gov/DP133/SRTM/SRTMGL1.003/2000.02.11/"
     if name:
         url = baseurl + name
     else:
@@ -189,23 +178,19 @@ def download_and_unzip_SRTM(url, destfile, exdir, rmzip=True):
         os.remove(destfile)
     return(True)
     
-def get_tile_path_CDEM():
-    raise NotImplementedError()
-    
-def download_single_DEM(DEM_id, DEM_dir, replace=False, product="CDED"):
+def download_single_DEM(DEM_id, DEM_dir, replace=False, product="CDEM"):
     """ Download a DEM tile 
     
     *Parameters*
     
     DEM_id : str
-        Name or NTS sheet of tile to download. If product is "NED" or "SRTM", a name should
-        be specified, but if product is "CDED", then a NTS sheet should be.
+        Name of tile to download.
     DEM_dir : str 
         Path to which files are downloaded
     replace : boolean
         Whether or not existing files should be re-downloaded and overwritten
     product : str
-        Which DEM tile series should be downloaded: ('NED', 'CDED')
+        Which DEM tile series should be downloaded: ('SRTM', 'CDEM')
         
     *Returns*
     
@@ -216,8 +201,8 @@ def download_single_DEM(DEM_id, DEM_dir, replace=False, product="CDED"):
     """
     output = True
 
-    if product.upper() == "CDED":
-        ftp_path = get_tile_path_CDED(NTS = DEM_id)
+    if product.upper() == "CDEM":
+        ftp_path = get_tile_path_CDED(DEM_id)
     elif product.upper() == "SRTM":
         ftp_path = get_tile_path_SRTM(name = DEM_id)
     else:
@@ -248,8 +233,7 @@ def download_single_DEM(DEM_id, DEM_dir, replace=False, product="CDED"):
         
     # If an appropriate file was downloaded, return the corresponding file paths
     if output:
-        pattern_dict = {"CDED" : "dem[ew_].*[td][ie][fm]$",
-                        "CDEM" : "dem[ew_].*[td][ie][fm]$",
+        pattern_dict = {"CDEM" : "dem[ew_].*[td][ie][fm]$",
                         "SRTM" : "hgt$"}
     
         pattern = pattern_dict[product]
@@ -307,17 +291,17 @@ def download_and_unzip(url, destfile, exdir, rmzip=True):
     return(True)
         
 
-def download_multiple_DEM(DEM, DEM_dir, product="CDED"):
+def download_multiple_DEM(DEM, DEM_dir, product="CDEM"):
     """ Download a list of DEM URLs. If they exist already, they are not downloaded
     
     *Parameters*
    
     DEM : list
-        List of DEM urls (NED) or NTS tiles (CDED)
+        Bounding box (SRTM) or list of tiles (CDEM)
     DEM_dir : str 
         Path to which files are downloaded
     product : str
-        Which DEM tile series should be downloaded: ('NED', 'CDED')
+        Which DEM tile series should be downloaded: ('SRTM', 'CDEM')
         
     *Returns*
    
@@ -325,9 +309,18 @@ def download_multiple_DEM(DEM, DEM_dir, product="CDED"):
         a list of file paths for target DEMs
     """
     # sanity check: make sure NTS names are well-formed
-    if product.upper() in ["CDED", "CDEM", "CDSM"]:
+    if product.upper() in ["CDEM"]:
         if not all([re.search("^\\d{3}\\w(\\d{2})?$", x) for x in DEM]):
             raise Exception("Bad format for one or more NTS strings")
+
+        # download each DEM file using the map function
+        get_single = lambda x: download_single_DEM(x, DEM_dir=DEM_dir, product=product)
+        files = map(get_single, DEM)
+
+        # return list of files
+        files = [f for f in files if f is not None]
+        files = [dem for sublist in files for dem in sublist]
+        return (files)
 
     elif product.upper() in "SRTM":
         for i in range (DEM['ymax'] - DEM['ymin'] + 1):
@@ -340,66 +333,11 @@ def download_multiple_DEM(DEM, DEM_dir, product="CDED"):
 
         return
 
+    else:
+        raise NotImplementedError
 
-    # download each DEM file using the map function
-    get_single = lambda x: download_single_DEM(x, DEM_dir = DEM_dir, product=product)        
-    files = map(get_single, DEM)
-    
-    # return list of files
-    files = [f for f in files if f is not None]
-    files = [dem for sublist in files for dem in sublist]
-    return(files)
-        
-
-def SRTM_tiles_from_extent(ext):
-    return degree_tiles_from_extent(ext, SRTM_tile_name, yoff=-1)
-
-def degree_tiles_from_extent(ext, tile_function, xoff=0, yoff=0):
-    """ Get a list of raster tiles required to cover a spatial extent
-
-    *Parameters*
-
-    ext : dict
-        Dictionary with the following keys: {xmin, xmax, ymin, ymax} corresponding
-        to the spatial extent in WGS84 decimal degrees
-    tile_function : function
-        function that takes lon, lat as keyword arguments and returns tile name
-
-    *Returns*
-
-    list
-        List of tile names required to cover specified spatial extent
-
-    *Examples*
-
-    E = {'xmin': -110 ,'xmax': -108,'ymin': 48 ,'ymax': 51 }
-    NED_tiles_from_extent(E)
-    """
-
-    # unpack extent dictionary
-    xmin = ext['xmin']
-    xmax = ext['xmax']
-    ymin = ext['ymin']
-    ymax = ext['ymax']
-
-    # get all corner coordinates to cover extent
-            # +1 beacuse of 0 indexing
-    xrange = range(int(np.floor(xmin)), int(np.floor(xmax)) + 1)
-    yrange = range(int(np.ceil(ymin)), int(np.ceil(ymax)) + 1)
-
-    xrange = [x + xoff for x in xrange]
-    yrange = [y + yoff for y in yrange]
-
-    pts = itertools.product(xrange, yrange)
-
-    # get tile index for all
-    f = lambda x: tile_function(lon = x[0], lat = x[1])
-    tiles =  [pth for pth in map(f, pts)]
-
-    return(tiles)
-
-def NTS_tiles_from_extent(ext, scale=1):
-    ''' Determine which NTS tiles are required to cover a target spatial extent
+def CDEM_tiles_from_extent(ext):
+    ''' Determine which CDEM tiles are required to cover a target spatial extent
 
     *Parameters*
 
@@ -412,7 +350,7 @@ def NTS_tiles_from_extent(ext, scale=1):
     *Examples*
 
         ext = {'ymin': 52, 'ymax': 53, 'xmin' : -114, 'xmax' : -112}
-        NTS_tiles_from_extent(ext)
+        CDEM_tiles_from_extent(ext)
     '''
     # unpack extent dictionary
     w = ext['xmin']
@@ -420,9 +358,9 @@ def NTS_tiles_from_extent(ext, scale=1):
     s = ext['ymin']
     n = ext['ymax']
 
-    # find NTS tiles
-    bbox = nts.makebbox(n=n, e=e, s=s, w=w)
-    tiles = nts.bybbox(bbox, scale)
+    # find CDEM tiles
+    bbox = CDEM.makebbox(n=n, e=e, s=s, w=w)
+    tiles = CDEM.bybbox(bbox)
 
     # convert to list of strings
     tile_list = [''.join(tile) for tile in tiles]
