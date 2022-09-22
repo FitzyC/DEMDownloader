@@ -9,7 +9,6 @@ import tarfile
 import zipfile
 
 import requests
-import netrc
 
 import numpy as np
 import urllib.request
@@ -88,97 +87,8 @@ def get_tile_path_SRTM(lon=None, lat=None, name=None):
         url = baseurl + name
     return url
 
-
-class SessionWithHeaderRedirection(requests.Session):
-    AUTH_HOST = 'urs.earthdata.nasa.gov'
-    def __init__(self, username, password):
-        super().__init__()
-        self.auth = (username, password)
-
-   # Overrides from the library to keep headers when redirected to or from
-   # the NASA auth host.
-
-    def rebuild_auth(self, prepared_request, response):
-        headers = prepared_request.headers
-        url = prepared_request.url
-
-        if 'Authorization' in headers:
-            original_parsed = requests.utils.urlparse(response.request.url)
-            redirect_parsed = requests.utils.urlparse(url)
-
-            if (original_parsed.hostname != redirect_parsed.hostname) and \
-                redirect_parsed.hostname != self.AUTH_HOST and \
-                original_parsed.hostname != self.AUTH_HOST:
-
-                del headers['Authorization']
-        return
-        
-            
-def downloadSRTM(url, destfile, username=None, password=None, retry=5):
-    """
-    Downloads an SRTM tile.  
     
-    *Parameters*
-    
-    url : str
-        path to SRTM tile
-    username : str (optional)
-        USGS Earthdata username. If missing, looks for the existence of a .netrc
-        file in your home directory 
-    password : str (optional)
-        USGS Earthdata username. If missing, looks for the existence of a .netrc
-        file in your home directory 
-    retry : int
-        how many times to retry downloading
-    If username / password are not provided, the function requires a netrc
-     file in your home directory (named either '_netrc' or '.netrc')
-    with the following contents:
-    machine <hostname>
-    login <login>
-    password <password>
-    """
-    print(url)
-    if not (username and password):
-        try:
-            auth = netrc.netrc()
-        except OSError:
-            auth = netrc.netrc('_netrc')
-        username, account, password = auth.authenticators("urs.earthdata.nasa.gov")
-
-    session = SessionWithHeaderRedirection(username, password)
-    filename = url[url.rfind('/')+1:] 
-
-    while retry:
-        try:
-            # submit the request using the session
-            response = session.get(url, stream=True)
-            print(response.status_code)
-            # raise an exception in case of http errors
-            response.raise_for_status()  
-        
-            # save the file
-            with open(destfile, 'wb') as fd:
-                for chunk in response.iter_content(chunk_size=1024*1024):
-                    fd.write(chunk)
-            break
-            
-        except requests.exceptions.HTTPError as e:
-            retry -= 1
-            print(e)
-        
-        except requests.exceptions.ConnectionError as e:
-            retry -= 1
-            print(e)
-            
-def download_and_unzip_SRTM(url, destfile, exdir, rmzip=True):
-    downloadSRTM(url, destfile)
-    with zipfile.ZipFile(destfile, "r") as zipf:
-        zipf.extractall(exdir)
-    if rmzip:
-        os.remove(destfile)
-    return(True)
-    
-def download_single_DEM(DEM_id, DEM_dir, replace=False, product="CDEM"):
+def download_single_DEM(DEM_id, DEM_dir, replace=False, product="CDEM", auth=None):
     """ Download a DEM tile 
     
     *Parameters*
@@ -227,9 +137,9 @@ def download_single_DEM(DEM_id, DEM_dir, replace=False, product="CDEM"):
         print("{} exists locally and was not downloaded\n".format(dest_dir))
     else:
         if product.upper() == "SRTM":
-            output = download_and_unzip_SRTM(url = ftp_path, destfile = destfile, exdir = dest_dir)
+            output = download_and_unzip(ftp_path, destfile, product="SRTM", authToken=auth, exdir = dest_dir)
         else:
-            output = download_and_unzip(url = ftp_path, destfile = destfile, exdir = dest_dir)
+            output = download_and_unzip(ftp_path, destfile, exdir = dest_dir)
         
     # If an appropriate file was downloaded, return the corresponding file paths
     if output:
@@ -243,7 +153,7 @@ def download_single_DEM(DEM_id, DEM_dir, replace=False, product="CDEM"):
         
         return(dem)
     
-def download_and_unzip(url, destfile, exdir, rmzip=True):
+def download_and_unzip(url, destfile, exdir, product="CDEM", authToken=None, rmzip=True):
     """ 
     Downloads and unzips a file
 
@@ -263,16 +173,34 @@ def download_and_unzip(url, destfile, exdir, rmzip=True):
     str
         path(s) to target tiles
     """
-    
-    try:
-        print("Downloading file from {}".format(url))
-        urllib.request.urlretrieve(url, destfile)
-   
-    # if the url doesn't exist    
-    except Exception as e:
-        print(url)
-        print(e)
-        return(False)
+    if product == "CDEM":
+        try:
+            print("Downloading file from {}".format(url))
+            urllib.request.urlretrieve(url, destfile)
+
+        # if the url doesn't exist
+        except Exception as e:
+            print(url)
+            print(e)
+            return(False)
+    elif product == "SRTM":
+        if authToken is None:
+            raise PermissionError("Invalid token, NONE")
+
+        try:
+            print("Downloading file from {}".format(url))
+            response = requests.get(url, headers={
+                'Authorization': 'Bearer {}'.format(authToken)})
+
+            response.raise_for_status()
+            open(destfile, 'wb').write(response.content)
+
+        except Exception as e:
+            print(e)
+            return (False)
+
+    else:
+        raise NotImplementedError
     
     if destfile.endswith("tar.gz"):
         with tarfile.open(destfile, "r:gz") as tarf:
@@ -291,7 +219,7 @@ def download_and_unzip(url, destfile, exdir, rmzip=True):
     return(True)
         
 
-def download_multiple_DEM(DEM, DEM_dir, product="CDEM"):
+def download_multiple_DEM(DEM, DEM_dir, product="CDEM", auth=None):
     """ Download a list of DEM URLs. If they exist already, they are not downloaded
     
     *Parameters*
@@ -327,7 +255,7 @@ def download_multiple_DEM(DEM, DEM_dir, product="CDEM"):
             for j in range(DEM['xmax'] - DEM['xmin'] + 1):
                 name = SRTM_tile_name(DEM['xmin'] + j, DEM['ymin']+i)
                 try:
-                    download_single_DEM(name, DEM_dir = DEM_dir, product=product)
+                    download_single_DEM(name, DEM_dir = DEM_dir, product=product, auth=auth)
                 except:
                     continue
 
